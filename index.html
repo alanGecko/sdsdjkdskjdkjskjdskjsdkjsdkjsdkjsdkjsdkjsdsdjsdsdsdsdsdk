@@ -3,31 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UNO P2P (Full Rules Lite)</title>
+<title>UNO P2P (Improved)</title>
 <style>
 body { font-family: Arial; text-align: center; background: #0b6623; color: white; }
-.card { display: inline-block; padding: 10px; margin: 5px; background: white; color: black; border-radius: 8px; cursor: pointer; min-width:40px }
-.card.red{background:#e74c3c;color:white}
-.card.green{background:#2ecc71;color:white}
-.card.blue{background:#3498db;color:white}
-.card.yellow{background:#f1c40f;color:black}
-#players { margin-top:10px }
+.card { display:inline-block;padding:10px;margin:5px;border-radius:8px;cursor:pointer;min-width:40px }
+.red{background:#e74c3c;color:white}.green{background:#2ecc71}.blue{background:#3498db}.yellow{background:#f1c40f;color:black}.wild{background:black;color:white}
 button{margin:5px;padding:8px 12px;border-radius:6px;border:none;cursor:pointer}
+#colorPicker button{width:40px;height:40px}
 </style>
 </head>
 <body>
-<h1>UNO (P2P)</h1>
+<h1>UNO (P2P Improved)</h1>
 
-<div>
 <input id="name" placeholder="Your name">
 <button onclick="hostGame()">Host</button>
 <button onclick="joinGame()">Join</button>
-</div>
 
 <div id="connect" style="display:none;">
-<p>Host ID:</p>
-<b id="myId"></b>
-<br>
+<p>Host ID:</p><b id="myId"></b><br>
 <input id="peerId" placeholder="Enter host ID">
 <button onclick="connectToHost()">Connect</button>
 </div>
@@ -35,7 +28,7 @@ button{margin:5px;padding:8px 12px;border-radius:6px;border:none;cursor:pointer}
 <div id="lobby" style="display:none;">
 <h2>Lobby</h2>
 <div id="players"></div>
-<button id="startBtn" onclick="startGame()" style="display:none;">Start Game</button>
+<button id="startBtn" onclick="startGame()">Start Game</button>
 </div>
 
 <div id="game" style="display:none;">
@@ -45,183 +38,115 @@ button{margin:5px;padding:8px 12px;border-radius:6px;border:none;cursor:pointer}
 <button onclick="drawCard()">Draw</button>
 </div>
 
+<div id="colorPicker" style="display:none;">
+<p>Pick a color:</p>
+<button class="red" onclick="pickColor('red')"></button>
+<button class="green" onclick="pickColor('green')"></button>
+<button class="blue" onclick="pickColor('blue')"></button>
+<button class="yellow" onclick="pickColor('yellow')"></button>
+</div>
+
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-let peer, conn;
-let isHost=false;
-let playerName;
-
-let players=[];
-let hands={};
-let deck=[];
-let discard=[];
-let currentPlayerIndex=0;
-let direction=1;
-let gameStarted=false;
+let peer, conns=[];
+let isHost=false, playerName;
+let players=[], hands={}, deck=[], discard=[];
+let current=0, direction=1, gameStarted=false, pendingWild=null;
 
 function createDeck(){
-  const colors=['red','green','blue','yellow'];
-  deck=[];
-  colors.forEach(color=>{
-    for(let i=0;i<=9;i++){
-      deck.push({color,value:i});
-      if(i!==0) deck.push({color,value:i});
-    }
-    ['skip','reverse','draw2'].forEach(v=>{
-      deck.push({color,value:v});
-      deck.push({color,value:v});
-    });
+  const colors=['red','green','blue','yellow']; deck=[];
+  colors.forEach(c=>{
+    for(let i=0;i<=9;i++){deck.push({color:c,value:i}); if(i!==0) deck.push({color:c,value:i});}
+    ['skip','reverse','draw2'].forEach(v=>{deck.push({color:c,value:v});deck.push({color:c,value:v});});
   });
-  for(let i=0;i<4;i++){
-    deck.push({color:'wild',value:'wild'});
-    deck.push({color:'wild',value:'draw4'});
-  }
+  for(let i=0;i<4;i++){deck.push({color:'wild',value:'wild'});deck.push({color:'wild',value:'draw4'});} 
   deck.sort(()=>Math.random()-0.5);
 }
 
 function hostGame(){
-  isHost=true;
-  playerName=document.getElementById('name').value;
-  peer=new Peer();
-  peer.on('open',id=>{
-    document.getElementById('connect').style.display='block';
-    document.getElementById('myId').innerText=id;
-    document.getElementById('lobby').style.display='block';
-    players.push(playerName);
-    updateLobby();
-    document.getElementById('startBtn').style.display='inline-block';
-  });
-  peer.on('connection',c=>{
-    conn=c;
-    setupConnection();
-  });
+  isHost=true; playerName=name.value; peer=new Peer();
+  peer.on('open',id=>{connect.style.display='block'; myId.innerText=id; lobby.style.display='block'; players=[playerName]; updateLobby();});
+  peer.on('connection',c=>{conns.push(c); setupConn(c);});
 }
 
-function joinGame(){
-  playerName=document.getElementById('name').value;
-  peer=new Peer();
-  document.getElementById('connect').style.display='block';
+function joinGame(){ playerName=name.value; peer=new Peer(); connect.style.display='block'; }
+function connectToHost(){ let c=peer.connect(peerId.value); conns=[c]; setupConn(c); }
+
+function setupConn(c){
+  c.on('open',()=>{c.send({type:'join',name:playerName});});
+  c.on('data',data=>handleData(data));
 }
 
-function connectToHost(){
-  conn=peer.connect(document.getElementById('peerId').value);
-  setupConnection();
+function broadcast(data){ conns.forEach(c=>c.send(data)); }
+
+function handleData(data){
+  if(data.type==='join' && isHost && !gameStarted){ players.push(data.name); updateLobby(); }
+  if(data.type==='lobby'){ players=data.players; lobby.style.display='block'; updateLobby(); }
+  if(data.type==='start'){ Object.assign(window,data.state); startRender(); }
+  if(data.type==='state'){ Object.assign(window,data.state); updateGame(); }
 }
 
-function setupConnection(){
-  conn.on('open',()=>{
-    conn.send({type:'join',name:playerName});
-  });
+function updateLobby(){ playersDiv.innerText='Players: '+players.join(', '); if(isHost) broadcast({type:'lobby',players}); }
 
-  conn.on('data',data=>{
-    if(data.type==='lobby'){
-      players=data.players;
-      document.getElementById('lobby').style.display='block';
-      updateLobby();
-    }
-    if(data.type==='start'){
-      gameStarted=true;
-      players=data.players;
-      hands=data.hands;
-      discard=data.discard;
-      currentPlayerIndex=data.current;
-      direction=data.direction;
-      document.getElementById('lobby').style.display='none';
-      document.getElementById('game').style.display='block';
-      updateGame();
-    }
-    if(data.type==='state'){
-      hands=data.hands;
-      discard=data.discard;
-      currentPlayerIndex=data.current;
-      direction=data.direction;
-      updateGame();
-    }
-  });
-}
+function startGame(){ if(!isHost) return; gameStarted=true; createDeck(); players.sort(()=>Math.random()-0.5);
+  players.forEach(p=>hands[p]=deck.splice(0,7)); discard=[deck.pop()]; current=Math.floor(Math.random()*players.length);
+  startRender(); sync(); }
 
-function updateLobby(){
-  document.getElementById('players').innerText='Players: '+players.join(', ');
-  if(isHost && conn){
-    conn.send({type:'lobby',players});
-  }
-}
+function startRender(){ lobby.style.display='none'; game.style.display='block'; updateGame(); }
 
-function startGame(){
-  if(!isHost) return;
-  gameStarted=true;
-  createDeck();
-  players=players.sort(()=>Math.random()-0.5);
-  players.forEach(p=>{
-    hands[p]=deck.splice(0,7);
-  });
-  discard=[deck.pop()];
-  currentPlayerIndex=Math.floor(Math.random()*players.length);
-  document.getElementById('lobby').style.display='none';
-  document.getElementById('game').style.display='block';
-  sync();
-}
-
-function canPlay(card,top){
-  return card.color===top.color || card.value===top.value || card.color==='wild';
-}
+function canPlay(c,t){ return c.color===t.color||c.value===t.value||c.color==='wild'; }
 
 function playCard(card){
-  if(players[currentPlayerIndex]!==playerName) return;
-  const top=discard[discard.length-1];
+  if(players[current]!==playerName) return;
+  let top=discard.at(-1);
   if(!canPlay(card,top)) return;
 
-  hands[playerName]=hands[playerName].filter(c=>c!==card);
+  hands[playerName]=hands[playerName].filter(x=>x!==card);
   discard.push(card);
 
-  if(card.value==='skip') nextPlayer(2);
-  else if(card.value==='reverse') {direction*=-1; nextPlayer(1);} 
-  else if(card.value==='draw2') { nextPlayer(1,true,2);} 
-  else if(card.value==='draw4') { nextPlayer(1,true,4);} 
-  else nextPlayer(1);
+  if(card.color==='wild'){ pendingWild=card; colorPicker.style.display='block'; return; }
 
-  sync();
+  applyEffects(card);
 }
 
-function nextPlayer(step,draw=false,count=0){
-  currentPlayerIndex=(currentPlayerIndex+direction*step+players.length)%players.length;
-  if(draw){
-    const p=players[currentPlayerIndex];
-    for(let i=0;i<count;i++) hands[p].push(deck.pop());
-  }
+function pickColor(color){
+  discard[discard.length-1].color=color;
+  colorPicker.style.display='none';
+  applyEffects(pendingWild);
+  pendingWild=null;
 }
 
-function drawCard(){
-  if(players[currentPlayerIndex]!==playerName) return;
-  hands[playerName].push(deck.pop());
-  nextPlayer(1);
-  sync();
+function applyEffects(card){
+  if(card.value==='skip') next(2);
+  else if(card.value==='reverse'){ direction*=-1; next(1); }
+  else if(card.value==='draw2'){ next(1,true,2); }
+  else if(card.value==='draw4'){ next(1,true,4); }
+  else next(1);
+
+  checkWin(); sync();
 }
+
+function next(step,draw=false,count=0){
+  current=(current+direction*step+players.length)%players.length;
+  if(draw){ let p=players[current]; for(let i=0;i<count;i++) hands[p].push(deck.pop()); }
+}
+
+function drawCard(){ if(players[current]!==playerName) return; hands[playerName].push(deck.pop()); next(1); sync(); }
+
+function checkWin(){ if(hands[playerName].length===0){ alert(playerName+' wins!'); location.reload(); } }
 
 function updateGame(){
-  document.getElementById('status').innerText = 'Turn: '+players[currentPlayerIndex];
-
-  const top=discard[discard.length-1];
-  document.getElementById('topCard').innerHTML = `<div class="card ${top.color}">${top.value}</div>`;
-
-  const handDiv=document.getElementById('hand');
-  handDiv.innerHTML='';
-
-  (hands[playerName]||[]).forEach(card=>{
-    const div=document.createElement('div');
-    div.className='card '+card.color;
-    div.innerText=card.value;
-    div.onclick=()=>playCard(card);
-    handDiv.appendChild(div);
+  status.innerText='Turn: '+players[current];
+  let t=discard.at(-1);
+  topCard.innerHTML=`<div class='card ${t.color}'>${t.value}</div>`;
+  hand.innerHTML='';
+  (hands[playerName]||[]).forEach(c=>{
+    let d=document.createElement('div'); d.className='card '+c.color; d.innerText=c.value;
+    d.onclick=()=>playCard(c); hand.appendChild(d);
   });
 }
 
-function sync(){
-  updateGame();
-  if(conn){
-    conn.send({type:'state',hands,discard,current:currentPlayerIndex,direction});
-  }
-}
+function sync(){ updateGame(); if(isHost) broadcast({type:'state',state:{players,hands,deck,discard,current,direction}}); }
 </script>
 </body>
 </html>
