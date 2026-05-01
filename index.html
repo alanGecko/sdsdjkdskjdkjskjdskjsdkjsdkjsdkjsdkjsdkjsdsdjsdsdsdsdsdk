@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNO P2P (No Server)</title>
+<style>
+body { font-family: Arial; text-align: center; background: #0b6623; color: white; }
+.card { display: inline-block; padding: 10px; margin: 5px; background: white; color: black; border-radius: 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>UNO (Peer-to-Peer)</h1>
+
+<div>
+<input id="name" placeholder="Your name">
+<button onclick="hostGame()">Host Game</button>
+<button onclick="joinGame()">Join Game</button>
+</div>
+
+<div id="connect" style="margin-top:20px; display:none;">
+<p>Share this ID with friends:</p>
+<b id="myId"></b>
+<input id="peerId" placeholder="Enter host ID">
+<button onclick="connectToHost()">Connect</button>
+</div>
+
+<div id="game" style="display:none;">
+<h2 id="status"></h2>
+<div id="topCard"></div>
+<div id="hand"></div>
+<button onclick="drawCard()">Draw</button>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+let peer;
+let conn;
+let isHost = false;
+let players = [];
+let deck = [];
+let topCard = null;
+let playerName;
+let hand = [];
+
+function createDeck() {
+  const colors = ['R','G','B','Y'];
+  deck = [];
+  colors.forEach(c => {
+    for (let i = 1; i <= 9; i++) deck.push(c+i);
+  });
+  deck.sort(() => Math.random() - 0.5);
+}
+
+function hostGame() {
+  isHost = true;
+  playerName = document.getElementById('name').value;
+  peer = new Peer();
+
+  peer.on('open', id => {
+    document.getElementById('connect').style.display = 'block';
+    document.getElementById('myId').innerText = id;
+  });
+
+  peer.on('connection', connection => {
+    conn = connection;
+    setupConnection();
+  });
+
+  createDeck();
+  topCard = deck.pop();
+  hand = deck.splice(0, 5);
+  updateUI();
+}
+
+function joinGame() {
+  playerName = document.getElementById('name').value;
+  peer = new Peer();
+  document.getElementById('connect').style.display = 'block';
+}
+
+function connectToHost() {
+  const hostId = document.getElementById('peerId').value;
+  conn = peer.connect(hostId);
+  setupConnection();
+}
+
+function setupConnection() {
+  conn.on('open', () => {
+    document.getElementById('game').style.display = 'block';
+    conn.send({ type: 'join', name: playerName });
+  });
+
+  conn.on('data', data => {
+    if (data.type === 'state') {
+      hand = data.hand;
+      topCard = data.topCard;
+      updateUI();
+    }
+  });
+}
+
+function updateUI() {
+  document.getElementById('status').innerText = 'Top Card: ' + topCard;
+
+  const handDiv = document.getElementById('hand');
+  handDiv.innerHTML = '';
+
+  hand.forEach(card => {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerText = card;
+    div.onclick = () => playCard(card);
+    handDiv.appendChild(div);
+  });
+}
+
+function playCard(card) {
+  if (!isHost) {
+    conn.send({ type: 'play', card });
+    return;
+  }
+
+  topCard = card;
+  hand = hand.filter(c => c !== card);
+  sync();
+}
+
+function drawCard() {
+  if (!isHost) {
+    conn.send({ type: 'draw' });
+    return;
+  }
+
+  hand.push(deck.pop());
+  sync();
+}
+
+function sync() {
+  updateUI();
+  if (conn) {
+    conn.send({ type: 'state', hand, topCard });
+  }
+}
+</script>
+</body>
+</html>
